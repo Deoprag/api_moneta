@@ -1,0 +1,85 @@
+package br.com.deopraglabs.moneta.services;
+
+import br.com.deopraglabs.moneta.exceptions.InvalidUsernameOrPasswordException;
+import br.com.deopraglabs.moneta.repositories.UserRepository;
+import br.com.deopraglabs.moneta.security.JwtTokenProvider;
+import br.com.deopraglabs.moneta.dtos.request.AccountCredentialsRequest;
+import br.com.deopraglabs.moneta.dtos.response.TokenResponse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.logging.Logger;
+
+@Service
+public class AuthService {
+
+    private final Logger logger = Logger.getLogger(
+            AuthService.class.getName()
+    );
+
+    private final JwtTokenProvider tokenProvider;
+    private final AuthenticationManager authenticationManager;
+    private final UserRepository userRepository;
+
+    @Autowired
+    AuthService(
+            JwtTokenProvider tokenProvider,
+            AuthenticationManager authenticationManager,
+            UserRepository userRepository
+    ) {
+        this.tokenProvider = tokenProvider;
+        this.authenticationManager = authenticationManager;
+        this.userRepository = userRepository;
+    }
+
+    public ResponseEntity<?> signIn(AccountCredentialsRequest data) {
+        logger.info("Signing In: " + data.getUsername());
+        try {
+            final var username = data.getUsername();
+            final var password = data.getPassword();
+
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(username, password));
+
+            final var user = userRepository.findByUsername(username);
+            var tokenResponse = new TokenResponse();
+
+            if (user.isPresent()) {
+                tokenResponse = tokenProvider.createAccessToken(username, user.get().getRoles());
+            } else {
+                throw new UsernameNotFoundException("Username " + username + " not found");
+            }
+
+            final HashMap<String, Object> map = new HashMap<>();
+            map.put("token", tokenResponse);
+            map.put("userId", user.get().getId());
+
+            return ResponseEntity.ok(map);
+        } catch (Exception e) {
+            throw new InvalidUsernameOrPasswordException("Invalid username or password");
+        }
+    }
+
+    public ResponseEntity<?> refreshToken(String username, String refreshToken) {
+        logger.info("Refreshing token from: " + username);
+        final var user = userRepository.findByUsername(username);
+        var tokenResponse = new TokenResponse();
+
+        if (user.isPresent()) {
+            tokenResponse = tokenProvider.refreshToken(refreshToken);
+        } else {
+            throw new UsernameNotFoundException("Username '" + username + "' not found");
+        }
+
+        final HashMap<String, Object> map = new HashMap<>();
+        map.put("token", tokenResponse);
+        map.put("userId", user.get().getId());
+
+        return ResponseEntity.ok(map);
+    }
+}
